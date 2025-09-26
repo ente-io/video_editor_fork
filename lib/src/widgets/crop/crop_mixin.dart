@@ -31,9 +31,15 @@ mixin CropPreviewMixin<T extends StatefulWidget> on State<T> {
     VideoEditorController controller, {
     EdgeInsets margin = EdgeInsets.zero,
     bool shouldFlipped = false,
+    double? overrideWidth,
+    double? overrideHeight,
   }) {
     if (viewerSize == Size.zero) return Size.zero;
-    final videoRatio = controller.video.value.aspectRatio;
+
+    final videoRatio = (overrideWidth != null && overrideHeight != null)
+        ? overrideWidth / overrideHeight
+        : controller.video.value.aspectRatio;
+
     final size = Size(viewerSize.width - margin.horizontal,
         viewerSize.height - margin.vertical);
     if (shouldFlipped) {
@@ -55,6 +61,7 @@ mixin CropPreviewMixin<T extends StatefulWidget> on State<T> {
     TransformData transform,
     CropBoundaries boundary, {
     bool showGrid = false,
+    double? overrideAspectRatio,
   }) {
     return SizedBox.fromSize(
       size: layout,
@@ -63,6 +70,7 @@ mixin CropPreviewMixin<T extends StatefulWidget> on State<T> {
         transform: transform,
         child: VideoViewer(
           controller: controller,
+          overrideAspectRatio: overrideAspectRatio,
           child: buildPaint(
             controller,
             boundary: boundary,

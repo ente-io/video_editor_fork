@@ -25,6 +25,8 @@ class CropGridViewer extends StatefulWidget {
   const CropGridViewer.preview({
     super.key,
     required this.controller,
+    this.overrideWidth,
+    this.overrideHeight,
   })  : showGrid = false,
         rotateCropArea = true,
         margin = EdgeInsets.zero;
@@ -34,6 +36,8 @@ class CropGridViewer extends StatefulWidget {
     required this.controller,
     this.margin = const EdgeInsets.symmetric(horizontal: 20),
     this.rotateCropArea = true,
+    this.overrideWidth,
+    this.overrideHeight,
   }) : showGrid = true;
 
   /// The [controller] param is mandatory so every change in the controller settings will propagate in the crop view
@@ -53,6 +57,12 @@ class CropGridViewer extends StatefulWidget {
   ///
   /// Defaults to `true` (like iOS Photos app crop)
   final bool rotateCropArea;
+
+  /// Optional override for video width (used for rotation correction)
+  final double? overrideWidth;
+
+  /// Optional override for video height (used for rotation correction)
+  final double? overrideHeight;
 
   @override
   State<CropGridViewer> createState() => _CropGridViewerState();
@@ -95,6 +105,8 @@ class _CropGridViewerState extends State<CropGridViewer> with CropPreviewMixin {
         _controller,
         margin: widget.margin,
         shouldFlipped: _controller.isRotated && widget.showGrid,
+        overrideWidth: widget.overrideWidth,
+        overrideHeight: widget.overrideHeight,
       );
 
   /// Update crop [Rect] after change in [_controller] such as change of aspect ratio
@@ -363,6 +375,11 @@ class _CropGridViewerState extends State<CropGridViewer> with CropPreviewMixin {
   /// Returns the [VideoViewer] tranformed with editing view
   /// Paint rect on top of the video area outside of the crop rect
   Widget _buildCropView(TransformData transform) {
+    final overrideAspectRatio =
+        (widget.overrideWidth != null && widget.overrideHeight != null)
+            ? widget.overrideWidth! / widget.overrideHeight!
+            : null;
+
     return Padding(
       padding: widget.margin,
       child: buildVideoView(
@@ -370,6 +387,7 @@ class _CropGridViewerState extends State<CropGridViewer> with CropPreviewMixin {
         transform,
         _boundary,
         showGrid: widget.showGrid,
+        overrideAspectRatio: overrideAspectRatio,
       ),
     );
   }

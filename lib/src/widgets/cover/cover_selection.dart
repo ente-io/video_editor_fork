@@ -104,7 +104,7 @@ class _CoverSelectionState extends State<CoverSelection>
   /// Returns the max size the layout should take with the rect value
   Size _calculateMaxLayout() {
     final ratio = _rect.value == Rect.zero
-        ? widget.controller.video.value.aspectRatio
+        ? widget.controller.videoAspectRatio
         : _rect.value.size.aspectRatio;
     return ratio < 1.0
         ? Size(widget.size * ratio, widget.size)

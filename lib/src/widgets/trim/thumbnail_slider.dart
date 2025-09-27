@@ -83,7 +83,7 @@ class _ThumbnailSliderState extends State<ThumbnailSlider> {
   /// Returns the max size the layout should take with the rect value
   Size _calculateMaxLayout() {
     final ratio = _rect.value == Rect.zero
-        ? widget.controller.video.value.aspectRatio
+        ? widget.controller.videoAspectRatio
         : _rect.value.size.aspectRatio;
 
     // check if the ratio is almost 1

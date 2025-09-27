@@ -18,7 +18,7 @@ dependencies:
   fraction: ^4.1.4
   image_picker: ^0.8.9
   path: ^1.8.2
-  video_player: ^2.6.1
+  native_video_player: ^4.0.0
   ffmpeg_kit_flutter_min: ^5.1.0
 
 flutter:

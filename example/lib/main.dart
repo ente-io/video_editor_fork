@@ -14,7 +14,7 @@ void main() => runApp(
         theme: ThemeData(
           primarySwatch: Colors.grey,
           brightness: Brightness.dark,
-          tabBarTheme: const TabBarTheme(
+          tabBarTheme: const TabBarThemeData(
             indicator: UnderlineTabIndicator(
               borderSide: BorderSide(color: Colors.white),
             ),
@@ -204,13 +204,13 @@ class _VideoEditorState extends State<VideoEditor> {
                                           CropGridViewer.preview(
                                               controller: _controller),
                                           AnimatedBuilder(
-                                            animation: _controller.video,
+                                            animation: _controller,
                                             builder: (_, __) => AnimatedOpacity(
                                               opacity:
                                                   _controller.isPlaying ? 0 : 1,
                                               duration: kThemeAnimationDuration,
                                               child: GestureDetector(
-                                                onTap: _controller.video.play,
+                                                onTap: _controller.video?.play,
                                                 child: Container(
                                                   width: 40,
                                                   height: 40,
@@ -384,10 +384,7 @@ class _VideoEditorState extends State<VideoEditor> {
   List<Widget> _trimSlider() {
     return [
       AnimatedBuilder(
-        animation: Listenable.merge([
-          _controller,
-          _controller.video,
-        ]),
+        animation: _controller,
         builder: (_, __) {
           final int duration = _controller.videoDuration.inSeconds;
           final double pos = _controller.trimPosition * duration;

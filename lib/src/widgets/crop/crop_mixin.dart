@@ -38,7 +38,7 @@ mixin CropPreviewMixin<T extends StatefulWidget> on State<T> {
 
     final videoRatio = (overrideWidth != null && overrideHeight != null)
         ? overrideWidth / overrideHeight
-        : controller.video.value.aspectRatio;
+        : controller.videoAspectRatio;
 
     final size = Size(viewerSize.width - margin.horizontal,
         viewerSize.height - margin.vertical);

@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:fraction/fraction.dart';
 import 'package:path/path.dart' as path;
-import 'package:video_player/video_player.dart';
+import 'package:native_video_player/native_video_player.dart';
 
 Future<void> _getImageDimension(File file,
     {required Function(Size) onResult}) async {
@@ -25,8 +26,8 @@ class VideoResultPopup extends StatefulWidget {
 }
 
 class _VideoResultPopupState extends State<VideoResultPopup> {
-  VideoPlayerController? _controller;
-  FileImage? _fileImage;
+  NativeVideoPlayerController? _controller;
+  StreamSubscription<void>? _eventsSubscription;
   Size _fileDimension = Size.zero;
   late final bool _isGif =
       path.extension(widget.video.path).toLowerCase() == ".gif";
@@ -41,25 +42,57 @@ class _VideoResultPopupState extends State<VideoResultPopup> {
         onResult: (d) => setState(() => _fileDimension = d),
       );
     } else {
-      _controller = VideoPlayerController.file(widget.video);
-      _controller?.initialize().then((_) {
-        _fileDimension = _controller?.value.size ?? Size.zero;
-        setState(() {});
-        _controller?.play();
-        _controller?.setLooping(true);
-      });
+      _initVideo();
     }
     _fileMbSize = _fileMBSize(widget.video);
   }
 
+  void _onControllerReady(NativeVideoPlayerController controller) {
+    _controller = controller;
+    _loadVideo();
+  }
+
+  Future<void> _initVideo() async {
+    if (_controller != null) {
+      await _loadVideo();
+    }
+  }
+
+  Future<void> _loadVideo() async {
+    if (_controller == null) return;
+
+    try {
+      _eventsSubscription = _controller!.events.listen((event) {
+        if (event is PlaybackReadyEvent) {
+          final info = _controller?.videoInfo;
+          _fileDimension = Size(
+            info?.width.toDouble() ?? 0,
+            info?.height.toDouble() ?? 0,
+          );
+          setState(() {});
+        } else if (event is PlaybackEndedEvent) {
+          _controller?.seekTo(Duration.zero);
+          _controller?.play();
+        }
+      });
+
+      await _controller!.loadVideo(
+        VideoSource(
+          path: widget.video.path,
+          type: VideoSourceType.file,
+        ),
+      );
+
+      await _controller!.play();
+    } catch (e) {
+      debugPrint('Error loading video: $e');
+    }
+  }
+
   @override
   void dispose() {
-    if (_isGif) {
-      _fileImage?.evict();
-    } else {
-      _controller?.pause();
-      _controller?.dispose();
-    }
+    _eventsSubscription?.cancel();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -75,8 +108,9 @@ class _VideoResultPopupState extends State<VideoResultPopup> {
               aspectRatio: _fileDimension.aspectRatio == 0
                   ? 1
                   : _fileDimension.aspectRatio,
-              child:
-                  _isGif ? Image.file(widget.video) : VideoPlayer(_controller!),
+              child: _isGif
+                  ? Image.file(widget.video)
+                  : NativeVideoPlayerView(onViewReady: _onControllerReady),
             ),
             Positioned(
               bottom: 0,
@@ -85,7 +119,7 @@ class _VideoResultPopupState extends State<VideoResultPopup> {
                   'Video path': widget.video.path,
                   if (!_isGif)
                     'Video duration':
-                        '${((_controller?.value.duration.inMilliseconds ?? 0) / 1000).toStringAsFixed(2)}s',
+                        '${((_controller?.videoInfo?.duration.inMilliseconds ?? 0) / 1000).toStringAsFixed(2)}s',
                   'Video ratio': Fraction.fromDouble(_fileDimension.aspectRatio)
                       .reduce()
                       .toString(),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_editor/src/controller.dart';
-import 'package:video_player/video_player.dart';
+import 'package:native_video_player/native_video_player.dart';
 
 class VideoViewer extends StatelessWidget {
   const VideoViewer({
@@ -16,15 +16,14 @@ class VideoViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aspectRatio =
-        overrideAspectRatio ?? controller.video.value.aspectRatio;
+    final aspectRatio = overrideAspectRatio ?? controller.videoAspectRatio;
 
     return GestureDetector(
       onTap: () {
-        if (controller.video.value.isPlaying) {
-          controller.video.pause();
+        if (controller.isPlaying) {
+          controller.video?.pause();
         } else {
-          controller.video.play();
+          controller.video?.play();
         }
       },
       child: Center(
@@ -32,7 +31,9 @@ class VideoViewer extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: aspectRatio,
-              child: VideoPlayer(controller.video),
+              child: NativeVideoPlayerView(
+                onViewReady: controller.onControllerReady,
+              ),
             ),
             if (child != null)
               AspectRatio(

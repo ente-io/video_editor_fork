@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_editor/src/utils/helpers.dart';
 import 'package:video_editor/src/utils/thumbnails.dart';
 import 'package:video_editor/src/models/cover_data.dart';
 import 'package:video_editor/video_editor.dart';
-import 'package:video_player/video_player.dart';
+import 'package:native_video_player/native_video_player.dart';
 
 class VideoMinDurationError extends Error {
   final Duration minDuration;
@@ -52,11 +53,7 @@ class VideoEditorController extends ChangeNotifier {
     this.coverStyle = const CoverSelectionStyle(),
     this.cropStyle = const CropGridStyle(),
     TrimSliderStyle? trimStyle,
-  })  : _video = VideoPlayerController.file(File(
-          // https://github.com/flutter/flutter/issues/40429#issuecomment-549746165
-          Platform.isIOS ? Uri.encodeFull(file.path) : file.path,
-        )),
-        trimStyle = trimStyle ?? TrimSliderStyle(),
+  })  : trimStyle = trimStyle ?? TrimSliderStyle(),
         assert(maxDuration == Duration.zero || maxDuration > minDuration,
             'The maximum duration must be bigger than the minimum duration');
 
@@ -78,31 +75,37 @@ class VideoEditorController extends ChangeNotifier {
 
   Duration _trimEnd = Duration.zero;
   Duration _trimStart = Duration.zero;
-  final VideoPlayerController _video;
+  NativeVideoPlayerController? _video;
+  bool _isPlaying = false;
+  Duration _currentPosition = Duration.zero;
+  StreamSubscription<void>? _eventsSubscription;
 
-  // Selected cover value
   final ValueNotifier<CoverData?> _selectedCover =
       ValueNotifier<CoverData?>(null);
 
-  /// Get the [VideoPlayerController]
-  VideoPlayerController get video => _video;
+  NativeVideoPlayerController? get video => _video;
 
-  /// Get the [VideoPlayerController.value.initialized]
-  bool get initialized => _video.value.isInitialized;
+  bool get initialized => _video?.videoInfo != null;
 
-  /// Get the [VideoPlayerController.value.isPlaying]
-  bool get isPlaying => _video.value.isPlaying;
+  /// Get whether the video is playing
+  bool get isPlaying => _isPlaying;
 
-  /// Get the [VideoPlayerController.value.position]
-  Duration get videoPosition => _video.value.position;
+  Duration get videoPosition => _currentPosition;
 
-  /// Get the [VideoPlayerController.value.duration]
-  Duration get videoDuration => _video.value.duration;
+  Duration get videoDuration => _video?.videoInfo?.duration ?? Duration.zero;
 
-  /// Get the [VideoPlayerController.value.size]
-  Size get videoDimension => _video.value.size;
+  Size get videoDimension => Size(
+        _video?.videoInfo?.width.toDouble() ?? 0,
+        _video?.videoInfo?.height.toDouble() ?? 0,
+      );
   double get videoWidth => videoDimension.width;
   double get videoHeight => videoDimension.height;
+
+  double get videoAspectRatio {
+    final info = _video?.videoInfo;
+    if (info == null || info.width == 0 || info.height == 0) return 1.0;
+    return info.width / info.height;
+  }
 
   /// The [minTrim] param is the minimum position of the trimmed area on the slider
   ///
@@ -200,15 +203,41 @@ class VideoEditorController extends ChangeNotifier {
   ///   // NOTE : handle the error here
   /// }, test: (e) => e is VideoMinDurationError);
   /// ```
+  void onControllerReady(NativeVideoPlayerController controller) {
+    _video = controller;
+    notifyListeners();
+  }
+
   Future<void> initialize({double? aspectRatio}) async {
-    await _video.initialize();
+    if (_video == null) {
+      throw StateError(
+          'Video controller not initialized. Make sure VideoViewer is in the widget tree.');
+    }
+
+    await _video!.loadVideo(
+      VideoSource(
+        path: Platform.isIOS ? Uri.encodeFull(file.path) : file.path,
+        type: VideoSourceType.file,
+      ),
+    );
 
     if (minDuration > videoDuration) {
       throw VideoMinDurationError(minDuration, videoDuration);
     }
 
-    _video.addListener(_videoListener);
-    _video.setLooping(true);
+    _eventsSubscription = _video!.events.listen((event) {
+      if (event is PlaybackStatusChangedEvent) {
+        _isPlaying = event.status == PlaybackStatus.playing;
+        notifyListeners();
+      } else if (event is PlaybackPositionChangedEvent) {
+        _currentPosition = Duration(milliseconds: event.positionInMilliseconds);
+        _videoListener();
+      } else if (event is PlaybackEndedEvent) {
+        _isPlaying = false;
+        _video?.seekTo(_trimStart);
+        notifyListeners();
+      }
+    });
 
     // if no [maxDuration] param given, maxDuration is the videoDuration
     maxDuration = maxDuration == Duration.zero ? videoDuration : maxDuration;
@@ -229,17 +258,16 @@ class VideoEditorController extends ChangeNotifier {
 
   @override
   Future<void> dispose() async {
-    if (_video.value.isPlaying) await _video.pause();
-    _video.removeListener(_videoListener);
-    _video.dispose();
+    if (_isPlaying) await _video?.pause();
+    await _eventsSubscription?.cancel();
+    _video?.dispose();
     _selectedCover.dispose();
     super.dispose();
   }
 
   void _videoListener() {
-    final position = videoPosition;
-    if (position < _trimStart || position > _trimEnd) {
-      _video.seekTo(_trimStart);
+    if (_currentPosition < _trimStart || _currentPosition > _trimEnd) {
+      _video?.seekTo(_trimStart);
     }
   }
 

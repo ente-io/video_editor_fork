@@ -20,11 +20,15 @@ class ImageViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final aspectRatio = controller.videoDimension.width > 0
+        ? controller.videoDimension.width / controller.videoDimension.height
+        : 1.0;
+
     return Center(
       child: Stack(
         children: [
           AspectRatio(
-            aspectRatio: controller.video.value.aspectRatio,
+            aspectRatio: aspectRatio,
             child: fadeIn
                 ? FadeInImage(
                     fadeInDuration: const Duration(milliseconds: 400),
@@ -39,7 +43,7 @@ class ImageViewer extends StatelessWidget {
           ),
           if (child != null)
             AspectRatio(
-              aspectRatio: controller.video.value.aspectRatio,
+              aspectRatio: aspectRatio,
               child: child,
             ),
         ],

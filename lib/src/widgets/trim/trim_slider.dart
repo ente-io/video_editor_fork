@@ -459,12 +459,12 @@ class _TrimSliderState extends State<TrimSlider>
         _boundary == _TrimBoundaries.left) {
       // reset position to startTrim
       _preComputedVideoPosition = _rect.left;
-      await widget.controller.video.seekTo(widget.controller.startTrim);
+      await widget.controller.nativeController?.seekTo(widget.controller.startTrim);
     } else if (_boundary == _TrimBoundaries.right) {
       // or if the right side changed and is under the current postion, reset position to endTrim
       // substract 10 milliseconds to avoid the video to loop and to show startTrim
       _preComputedVideoPosition = _rect.right;
-      await widget.controller.video.seekTo(widget.controller.endTrim);
+      await widget.controller.nativeController?.seekTo(widget.controller.endTrim);
     }
   }
 
@@ -475,8 +475,8 @@ class _TrimSliderState extends State<TrimSlider>
     final to = widget.controller.videoDuration *
         ((position + _scrollController.offset) /
             (_fullLayout.width + _horizontalMargin * 2));
-    await widget.controller.video.seekTo(
-        to > widget.controller.endTrim ? widget.controller.endTrim : to);
+    final seekTo = to > widget.controller.endTrim ? widget.controller.endTrim : to;
+    await widget.controller.nativeController?.seekTo(seekTo);
   }
 
   void _updateControllerTrim() {
@@ -490,10 +490,10 @@ class _TrimSliderState extends State<TrimSlider>
   void _updateControllerIsTrimming(bool value) {
     if (value && widget.controller.isPlaying) {
       _isVideoPlayerHold = true;
-      widget.controller.video.pause();
+      widget.controller.nativeController?.pause();
     } else if (_isVideoPlayerHold) {
       _isVideoPlayerHold = false;
-      widget.controller.video.play();
+      widget.controller.nativeController?.play();
     }
 
     if (_boundary != _TrimBoundaries.progress) {
@@ -619,10 +619,7 @@ class _TrimSliderState extends State<TrimSlider>
               onHorizontalDragEnd: _onHorizontalDragEnd,
               behavior: HitTestBehavior.opaque,
               child: AnimatedBuilder(
-                animation: Listenable.merge([
-                  widget.controller,
-                  widget.controller.video,
-                ]),
+                animation: widget.controller,
                 builder: (_, __) {
                   return RepaintBoundary(
                     child: CustomPaint(

@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:native_video_player/native_video_player.dart';
 import 'package:video_editor/src/utils/helpers.dart';
 import 'package:video_editor/src/utils/thumbnails.dart';
 import 'package:video_editor/src/models/cover_data.dart';
 import 'package:video_editor/video_editor.dart';
-import 'package:video_player/video_player.dart';
 
 class VideoMinDurationError extends Error {
   final Duration minDuration;
@@ -40,6 +41,20 @@ class VideoEditorController extends ChangeNotifier {
   /// Video from [File].
   final File file;
 
+  /// The native video player controller
+  NativeVideoPlayerController? _nativeController;
+
+  /// Stream subscription for playback events
+  StreamSubscription<PlaybackEvent>? _playbackSubscription;
+
+  /// Current playback state
+  bool _initialized = false;
+  bool _isPlaying = false;
+  Duration _videoPosition = Duration.zero;
+  Duration _videoDuration = Duration.zero;
+  Size _videoDimension = Size.zero;
+  int _displayQuarterTurns = 0;
+
   /// Constructs a [VideoEditorController] that edits a video from a file.
   ///
   /// The [file] argument must not be null.
@@ -52,11 +67,7 @@ class VideoEditorController extends ChangeNotifier {
     this.coverStyle = const CoverSelectionStyle(),
     this.cropStyle = const CropGridStyle(),
     TrimSliderStyle? trimStyle,
-  })  : _video = VideoPlayerController.file(File(
-          // https://github.com/flutter/flutter/issues/40429#issuecomment-549746165
-          Platform.isIOS ? Uri.encodeFull(file.path) : file.path,
-        )),
-        trimStyle = trimStyle ?? TrimSliderStyle(),
+  })  : trimStyle = trimStyle ?? TrimSliderStyle(),
         assert(maxDuration == Duration.zero || maxDuration > minDuration,
             'The maximum duration must be bigger than the minimum duration');
 
@@ -78,31 +89,99 @@ class VideoEditorController extends ChangeNotifier {
 
   Duration _trimEnd = Duration.zero;
   Duration _trimStart = Duration.zero;
-  final VideoPlayerController _video;
 
   // Selected cover value
   final ValueNotifier<CoverData?> _selectedCover =
       ValueNotifier<CoverData?>(null);
 
-  /// Get the [VideoPlayerController]
-  VideoPlayerController get video => _video;
+  /// Get the native video controller (exposed for widget integration)
+  NativeVideoPlayerController? get nativeController => _nativeController;
 
-  /// Get the [VideoPlayerController.value.initialized]
-  bool get initialized => _video.value.isInitialized;
+  /// Set the native controller (called from NativeVideoPlayerView onViewReady)
+  void setNativeController(NativeVideoPlayerController controller) {
+    print('[VideoEditor] setNativeController called');
+    print('[VideoEditor] Controller is null: ${controller == null}');
+    _nativeController = controller;
 
-  /// Get the [VideoPlayerController.value.isPlaying]
-  bool get isPlaying => _video.value.isPlaying;
+    // Set up event listener
+    _playbackSubscription?.cancel();
+    _playbackSubscription = controller.events.listen(_handlePlaybackEvent);
+    print('[VideoEditor] Native controller set and event listener attached');
+  }
 
-  /// Get the [VideoPlayerController.value.position]
-  Duration get videoPosition => _video.value.position;
+  /// Handle playback events from native player
+  void _handlePlaybackEvent(PlaybackEvent event) {
+    print('[VideoEditor] _handlePlaybackEvent: ${event.runtimeType}');
+    if (event is PlaybackStatusChangedEvent) {
+      print('[VideoEditor] PlaybackStatusChangedEvent: ${event.status}');
+      _isPlaying = event.status == PlaybackStatus.playing;
+      notifyListeners();
+    } else if (event is PlaybackPositionChangedEvent) {
+      // Reduce noisy logs: only log every ~1s
+      // print('[VideoEditor] PlaybackPositionChangedEvent: ${event.positionInMilliseconds}ms');
+      _videoPosition = Duration(milliseconds: event.positionInMilliseconds);
+      _checkTrimBounds();
+      notifyListeners();
+    } else if (event is PlaybackReadyEvent) {
+      print('[VideoEditor] PlaybackReadyEvent received');
+      _initialized = true;
+      final info = _nativeController?.videoInfo;
+      if (info != null) {
+        print('[VideoEditor] VideoInfo: ${info.width}x${info.height}, duration=${info.durationInMilliseconds}ms');
+        _videoDuration = Duration(milliseconds: info.durationInMilliseconds);
+        _videoDimension = Size(info.width.toDouble(), info.height.toDouble());
+      }
+      notifyListeners();
+    } else if (event is PlaybackEndedEvent) {
+      print('[VideoEditor] PlaybackEndedEvent received; looping to start trim');
+      // Loop back to start trim
+      _nativeController?.seekTo(_trimStart);
+      _nativeController?.play();
+    }
+  }
 
-  /// Get the [VideoPlayerController.value.duration]
-  Duration get videoDuration => _video.value.duration;
+  /// Check if video position is within trim bounds
+  void _checkTrimBounds() {
+    if (_nativeController == null) return;
 
-  /// Get the [VideoPlayerController.value.size]
-  Size get videoDimension => _video.value.size;
+    if (_videoPosition < _trimStart || _videoPosition > _trimEnd) {
+      _nativeController!.seekTo(_trimStart);
+    }
+  }
+
+  /// Get the [NativeVideoPlayerController] - for compatibility
+  NativeVideoPlayerController? get video => _nativeController;
+
+  /// Get initialization status
+  bool get initialized => _initialized;
+
+  /// Get playing status
+  bool get isPlaying => _isPlaying;
+
+  /// Get video position
+  Duration get videoPosition => _videoPosition;
+
+  /// Get video duration
+  Duration get videoDuration => _videoDuration;
+
+  /// Get video dimensions
+  Size get videoDimension => _videoDimension;
   double get videoWidth => videoDimension.width;
   double get videoHeight => videoDimension.height;
+
+  /// Quarter turns applied externally by the host UI (e.g., EXIF correction)
+  int get displayQuarterTurns => _displayQuarterTurns;
+
+  /// Allows the host UI to inform the controller about additional rotation
+  /// so dependent widgets can adjust their layout (e.g., aspect ratios).
+  void setDisplayQuarterTurns(int quarterTurns) {
+    final normalized = ((quarterTurns % 4) + 4) % 4;
+    if (_displayQuarterTurns == normalized) {
+      return;
+    }
+    _displayQuarterTurns = normalized;
+    notifyListeners();
+  }
 
   /// The [minTrim] param is the minimum position of the trimmed area on the slider
   ///
@@ -191,56 +270,133 @@ class VideoEditorController extends ChangeNotifier {
   /// Generate the default cover [_selectedCover]
   /// Initialize [minCrop] & [maxCrop] values base on [aspectRatio]
   ///
-  /// Throw a [VideoMinDurationError] error if the [minDuration] is bigger than [videoDuration], the error should be handled as such:
-  /// ```dart
-  ///  controller
-  ///     .initialize()
-  ///     .then((_) => setState(() {}))
-  ///     .catchError((error) {
-  ///   // NOTE : handle the error here
-  /// }, test: (e) => e is VideoMinDurationError);
-  /// ```
+  /// Note: With native_video_player, actual loading happens via NativeVideoPlayerView
+  /// This method sets up initial parameters and will complete initialization
+  /// when setNativeController is called
   Future<void> initialize({double? aspectRatio}) async {
-    await _video.initialize();
+    print('[VideoEditor] initialize called with aspectRatio: $aspectRatio');
+    print('[VideoEditor] File path: ${file.path}');
+    print('[VideoEditor] File exists: ${file.existsSync()}');
+    print('[VideoEditor] Native controller available: ${_nativeController != null}');
 
-    if (minDuration > videoDuration) {
-      throw VideoMinDurationError(minDuration, videoDuration);
-    }
+    // Always set the video path
+    // NOTE: native_video_player expects a plain filesystem path for file sources
+    // Using Uri.encodeFull breaks file resolution on iOS and prevents ready events.
+    final videoPath = file.path;
+    _videoPath = videoPath;
+    print('[VideoEditor] Video path: $_videoPath');
 
-    _video.addListener(_videoListener);
-    _video.setLooping(true);
-
-    // if no [maxDuration] param given, maxDuration is the videoDuration
-    maxDuration = maxDuration == Duration.zero ? videoDuration : maxDuration;
-
-    // Trim straight away when maxDuration is lower than video duration
-    if (maxDuration < videoDuration) {
-      updateTrim(
-          0.0, maxDuration.inMilliseconds / videoDuration.inMilliseconds);
-    } else {
-      _updateTrimRange();
-    }
-
+    // Set initial aspect ratio
     cropAspectRatio(aspectRatio);
-    generateDefaultCoverThumbnail();
 
-    notifyListeners();
+    // If controller is available, load video immediately
+    if (_nativeController != null) {
+      print('[VideoEditor] Controller available, loading video...');
+      await _loadVideo();
+    } else {
+      // This shouldn't happen if called from onViewReady
+      print('[VideoEditor] ERROR: Native controller is null during initialize!');
+      print('[VideoEditor] This should not happen if called from VideoViewer.onViewReady');
+    }
+  }
+
+  String? _videoPath;
+
+  /// Load the video into the native player
+  Future<void> _loadVideo() async {
+    print('[VideoEditor] _loadVideo called');
+    if (_nativeController == null || _videoPath == null) {
+      print('[VideoEditor] Controller or path is null - controller: ${_nativeController != null}, path: ${_videoPath != null}');
+      return;
+    }
+
+    try {
+      print('[VideoEditor] Loading video from path: $_videoPath');
+
+      // Create VideoSource object for native_video_player 4.0.0
+      final videoSource = VideoSource(
+        path: _videoPath!,
+        type: VideoSourceType.file,
+      );
+
+      // Use loadVideo method which is the correct API for native_video_player
+      await _nativeController!.loadVideo(videoSource);
+      print('[VideoEditor] Video source loaded successfully');
+
+      // Wait for ready event
+      print('[VideoEditor] Waiting for video to be ready...');
+      await _waitForReady();
+      print('[VideoEditor] Video is ready');
+
+      if (minDuration > videoDuration) {
+        throw VideoMinDurationError(minDuration, videoDuration);
+      }
+
+      // if no [maxDuration] param given, maxDuration is the videoDuration
+      maxDuration = maxDuration == Duration.zero ? videoDuration : maxDuration;
+
+      // Trim straight away when maxDuration is lower than video duration
+      if (maxDuration < videoDuration) {
+        updateTrim(
+            0.0, maxDuration.inMilliseconds / videoDuration.inMilliseconds);
+      } else {
+        _updateTrimRange();
+      }
+
+      print('[VideoEditor] Generating cover thumbnail...');
+      generateDefaultCoverThumbnail();
+
+      // Start playback
+      print('[VideoEditor] Starting playback...');
+      await _nativeController!.play();
+      print('[VideoEditor] Playback started');
+
+      notifyListeners();
+    } catch (e, stack) {
+      print('[VideoEditor] Error loading video: $e');
+      print('[VideoEditor] Stack trace: $stack');
+      rethrow;
+    }
+  }
+
+  /// Wait for the video to be ready
+  Future<void> _waitForReady() async {
+    if (_initialized) return;
+
+    final completer = Completer<void>();
+    StreamSubscription<PlaybackEvent>? sub;
+
+    sub = _nativeController!.events.listen((event) {
+      if (event is PlaybackReadyEvent) {
+        _initialized = true;
+        final info = _nativeController?.videoInfo;
+        if (info != null) {
+          _videoDuration = Duration(milliseconds: info.durationInMilliseconds);
+          _videoDimension = Size(info.width.toDouble(), info.height.toDouble());
+        }
+        sub?.cancel();
+        completer.complete();
+      }
+    });
+
+    await completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {
+        sub?.cancel();
+        throw Exception('Video initialization timeout');
+      },
+    );
   }
 
   @override
   Future<void> dispose() async {
-    if (_video.value.isPlaying) await _video.pause();
-    _video.removeListener(_videoListener);
-    _video.dispose();
+    if (_isPlaying && _nativeController != null) {
+      await _nativeController!.pause();
+    }
+    _playbackSubscription?.cancel();
+    _nativeController?.dispose();
     _selectedCover.dispose();
     super.dispose();
-  }
-
-  void _videoListener() {
-    final position = videoPosition;
-    if (position < _trimStart || position > _trimEnd) {
-      _video.seekTo(_trimStart);
-    }
   }
 
   //----------//
@@ -349,7 +505,9 @@ class VideoEditorController extends ChangeNotifier {
   ///
   /// Range of the param is `0.0` to `1.0`.
   double get trimPosition =>
-      videoPosition.inMilliseconds / videoDuration.inMilliseconds;
+      videoDuration.inMilliseconds > 0
+        ? videoPosition.inMilliseconds / videoDuration.inMilliseconds
+        : 0.0;
 
   //-----------//
   //VIDEO COVER//

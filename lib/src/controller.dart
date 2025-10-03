@@ -303,7 +303,7 @@ class VideoEditorController extends ChangeNotifier {
   String? _videoPath;
 
   /// Load the video into the native player
-  Future<void> _loadVideo() async {
+  Future<void> _loadVideo({Duration? fallbackDuration}) async {
     print('[VideoEditor] _loadVideo called');
     if (_nativeController == null || _videoPath == null) {
       print('[VideoEditor] Controller or path is null - controller: ${_nativeController != null}, path: ${_videoPath != null}');
@@ -325,8 +325,8 @@ class VideoEditorController extends ChangeNotifier {
 
       // Wait for ready event
       print('[VideoEditor] Waiting for video to be ready...');
-      await _waitForReady();
-      print('[VideoEditor] Video is ready');
+      await _waitForReady(fallbackDuration: fallbackDuration);
+      print('[VideoEditor] Video is ready with duration: $_videoDuration');
 
       if (minDuration > videoDuration) {
         throw VideoMinDurationError(minDuration, videoDuration);
@@ -360,7 +360,7 @@ class VideoEditorController extends ChangeNotifier {
   }
 
   /// Wait for the video to be ready
-  Future<void> _waitForReady() async {
+  Future<void> _waitForReady({Duration? fallbackDuration}) async {
     if (_initialized) return;
 
     final completer = Completer<void>();
@@ -371,7 +371,18 @@ class VideoEditorController extends ChangeNotifier {
         _initialized = true;
         final info = _nativeController?.videoInfo;
         if (info != null) {
-          _videoDuration = Duration(milliseconds: info.durationInMilliseconds);
+          final nativeDuration = Duration(milliseconds: info.durationInMilliseconds);
+          // Use fallback if native duration is invalid (0 or very small)
+          if (nativeDuration.inMilliseconds > 100) {
+            _videoDuration = nativeDuration;
+            print('[VideoEditor] Using native player duration: $_videoDuration');
+          } else if (fallbackDuration != null && fallbackDuration.inMilliseconds > 0) {
+            _videoDuration = fallbackDuration;
+            print('[VideoEditor] Native duration invalid ($nativeDuration), using fallback: $_videoDuration');
+          } else {
+            _videoDuration = nativeDuration;
+            print('[VideoEditor] WARNING: Both native and fallback durations are invalid!');
+          }
           _videoDimension = Size(info.width.toDouble(), info.height.toDouble());
         }
         sub?.cancel();
